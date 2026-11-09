@@ -1,0 +1,9 @@
+# secrets and personal data stay on this Mac
+.env
+.venv/
+original/
+plan.json
+db/profile.json
+*.local.*
+.DS_Store
+__pycache__/
