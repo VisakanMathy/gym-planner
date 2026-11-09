@@ -34,8 +34,7 @@ function showLogin(sentTo){
   document.getElementById('root').innerHTML = `
     <div class="slide login">
       <h2 class="ex-name">Sign in</h2>
-      ${sentTo ? `<p class="ex-detail">Check <b>${esc(sentTo)}</b>. Tap the link in the email, or type the code here.</p>
-        <div class="log-row"><input id="otp" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from the email"><button class="small-btn" onclick="verifyCode('${esc(sentTo)}')">Sign in</button></div>
+      ${sentTo ? `<p class="ex-detail">Check <b>${esc(sentTo)}</b> and tap <b>Sign in</b> in the email. Open it on this device, in this browser.</p>
         <a class="videolink" onclick="showLogin()">Use a different email</a>`
       : `<p class="ex-detail">Your sessions are saved to your own account, on any device.</p>
         <div class="log-row"><input id="email" type="email" autocomplete="email" placeholder="Email"><button class="small-btn" onclick="sendLink()">Send link</button></div>`}
