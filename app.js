@@ -16,6 +16,7 @@ let drafts = {};
 let lastSets = {};        // exercise name -> {day, sets:[{weight_kg,reps,seconds}]}
 let session='lower', idx=0, dir=1, pos=0, loaded=false, view='workout';
 let videoView = false;
+let userEmail = '';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
@@ -34,29 +35,55 @@ function showLogin(sentTo){
   document.getElementById('root').innerHTML = `
     <div class="slide login">
       <h2 class="ex-name">Sign in</h2>
-      ${sentTo ? `<p class="ex-detail">Check <b>${esc(sentTo)}</b> and tap <b>Sign in</b> in the email. Open it on this device, in this browser.</p>
-        <a class="videolink" onclick="showLogin()">Use a different email</a>`
-      : `<p class="ex-detail">Your sessions are saved to your own account, on any device.</p>
-        <div class="log-row"><input id="email" type="email" autocomplete="email" placeholder="Email"><button class="small-btn" onclick="sendLink()">Send link</button></div>`}
+      ${sentTo ? `<p class="ex-detail">Check <b>${esc(sentTo)}</b> and tap <b>Sign in</b> in the email. Whichever browser that opens is the one that gets signed in.</p>
+        <a class="videolink" onclick="showLogin()">Back</a>`
+      : `<form class="form" onsubmit="signInPassword(); return false;">
+          <label>Email<input id="email" type="email" autocomplete="username" required></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password"></label>
+          <div class="finish"><button type="submit">Sign in</button></div>
+        </form>
+        <a class="extra-link" onclick="sendLink()">No password yet? Email me a sign-in link</a>`}
     </div>`;
+}
+async function signInPassword(){
+  const email = document.getElementById('email').value.trim(), password = document.getElementById('password').value;
+  if(!password) return toast('Enter your password, or use the email link below', true);
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  if(error) return toast(error.message, true);
+  await loadAll();
 }
 async function sendLink(){
   const email = document.getElementById('email').value.trim();
-  if(!email) return;
+  if(!email) return toast('Enter your email first', true);
   const { error } = await db.auth.signInWithOtp({ email, options:{ shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
   if(error) return toast(error.message, true);
   showLogin(email);
 }
-async function verifyCode(email){
-  const token = document.getElementById('otp').value.trim();
-  const { error } = await db.auth.verifyOtp({ email, token, type:'email' });
+function showPassword(){
+  view='password'; setTabs('history');
+  document.getElementById('root').innerHTML = back() + `
+    <div class="slide">
+      <h2 class="ex-name">Set a password</h2>
+      <p class="ex-detail">Then you can sign in on any browser straight away, without waiting for an email.</p>
+      <form class="form" onsubmit="savePassword(); return false;">
+        <input type="email" autocomplete="username" value="${esc(userEmail)}" style="display:none" readonly>
+        <label>New password<input id="new-password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <div class="finish"><button type="submit">Save password</button></div>
+      </form>
+    </div>`;
+}
+async function savePassword(){
+  const password = document.getElementById('new-password').value;
+  if(password.length < 8) return toast('Use at least 8 characters', true);
+  const { error } = await db.auth.updateUser({ password });
   if(error) return toast(error.message, true);
-  await loadAll();
+  toast('Password saved'); showHistory();
 }
 async function signOut(){ await db.auth.signOut(); loaded=false; showLogin(); }
 
 // ---------------------------------------------------------------- load + save
 async function loadAll(){
+  const { data:{ user } } = await db.auth.getUser(); userEmail = user?.email || '';
   const [{ data:plans, error:e1 }, { data:open, error:e2 }, { data:sets, error:e3 }] = await Promise.all([
     db.from('plans').select('id,version,plan').eq('active', true).limit(1),
     db.from('activities').select('id,session_key,started_at,data').eq('type','gym').eq('status','in_progress'),
@@ -475,7 +502,7 @@ async function showHistory(){
     if(a.notes) html += `<div class="history-note">${esc(a.notes)}</div>`;
     html += `<div class="history-actions"><button onclick="deleteActivity('${a.id}')">Delete</button></div></div>`;
   }
-  html += `</div><p class="credit"><a onclick="signOut()">Sign out</a></p>`;
+  html += `</div><p class="credit"><a onclick="showPassword()">Set a password</a> &middot; <a onclick="signOut()">Sign out</a></p>`;
   document.getElementById('root').innerHTML = html;
 }
 async function deleteActivity(id){
