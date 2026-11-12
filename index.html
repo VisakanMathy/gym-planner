@@ -182,6 +182,10 @@
   .pick { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; font-family:inherit; font-size:15px; font-weight:500; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; }
   .pick small { font-size:12px; color:var(--ink-mute); font-weight:400; }
   .pick.new { border-style:dashed; color:var(--moss); }
+  .chips { display:flex; gap:6px; overflow-x:auto; margin:0 -20px 12px; padding:0 20px 2px; scrollbar-width:none; }
+  .chips::-webkit-scrollbar { display:none; }
+  .chip { flex-shrink:0; font-family:inherit; font-size:13px; font-weight:600; color:var(--ink-soft); background:var(--card); border:1px solid var(--line); border-radius:20px; padding:6px 12px; cursor:pointer; white-space:nowrap; }
+  .chip.on { background:var(--moss); border-color:var(--moss); color:#fff; }
 </style>
 </head>
 <body>

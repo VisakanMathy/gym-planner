@@ -149,7 +149,7 @@ function showStart(){
 async function startSession(mode, key){
   cur = Object.assign(emptyDraft(), { mode, session_key: mode==='plan' ? key : 'custom', day: todayISO(), started_at: new Date().toISOString() });
   cur.saved_at = Date.now(); writeLocal(CUR_KEY, cur);
-  idx=0; dir=1; pos=0;
+  idx=0; dir=1; pos=0; pickGroup='';
   pushDraft();
   goHome();
 }
@@ -176,6 +176,30 @@ function library(){
   for(const name of Object.keys(lastSets)) if(!out.has(name)) out.set(name, { ex:{ name, detail:'', log:true }, slot:null, from:'history' });
   return out;
 }
+// Muscle groups, read from each exercise's target in the plan (or its name, for exercises I typed in myself).
+// An exercise can sit in more than one group, e.g. "Glutes & hamstrings".
+const GROUPS = [
+  ['chest',     'Chest',      /chest|bench|push-?up|\bfly|flye/],
+  ['back',      'Back',       /\bback\b|upper-back|lower-back|\blats?\b|\brow\b|rowing|pull-?up|pulldown|chin-?up/],
+  ['shoulders', 'Shoulders',  /shoulder|rotator|overhead press|lateral raise|face pull/],
+  ['arms',      'Arms',       /bicep|tricep|grip|(hammer|bicep|ez|barbell|dumbbell) curl|skull|\bdips?\b/],
+  ['core',      'Core',       /core|\babs\b|oblique|anti-rotation|plank|dead bug|pallof|crunch|carry/],
+  ['glutes',    'Glutes',     /glute|hip thrust|bridge/],
+  ['legs',      'Legs',       /quad|\blegs?\b|squat|lunge|step-?up|leg press|split/],
+  ['hamstrings','Hamstrings', /hamstring|hinge|deadlift|\brdl\b|nordic|good morning/],
+  ['calves',    'Calves & ankles', /calf|calves|ankle|\bfoot\b|pogo/],
+  ['hips',      'Hips',       /\bhips?\b|adductor|groin|hip flexor/],
+  ['mobility',  'Mobility & warm-up', /release|mobility|warm-?up|\bprep\b|rehearsal|\bspine\b|thoracic|stretch/],
+];
+function groupsOf(ex){ const s = (ex.target || ex.name).toLowerCase(); return GROUPS.filter(g => g[2].test(s)).map(g => g[0]); }
+let pickGroup = '';
+function setPickGroup(g){ pickGroup = pickGroup === g ? '' : g; renderChips(); renderPicks(); }
+function renderChips(){
+  const all = [...library().values()];
+  const have = GROUPS.filter(g => all.some(x => groupsOf(x.ex).includes(g[0])));
+  document.getElementById('pick-chips').innerHTML = `<button class="chip ${pickGroup ? '' : 'on'}" onclick="setPickGroup('')">All</button>` +
+    have.map(g => `<button class="chip ${pickGroup === g[0] ? 'on' : ''}" onclick="setPickGroup('${g[0]}')">${esc(g[1])}</button>`).join('');
+}
 function showPicker(){
   view='pick'; setTabs('pick');
   const n = list().length;
@@ -185,18 +209,22 @@ function showPicker(){
       <h2 class="ex-name">${n ? 'Add an exercise' : 'What are you doing first?'}</h2>
       <p class="ex-detail">Search the plan and everything you've done before, or type a new one.</p>
       <div class="log-row"><input id="pick-q" type="search" placeholder="e.g. row, squat, plank" autocomplete="off" oninput="renderPicks()"></div>
+      <div id="pick-chips" class="chips"></div>
       <div id="pick-list" class="pick-list"></div>
     </div>`;
-  renderPicks();
+  renderChips(); renderPicks();
   document.getElementById('pick-q').focus();
 }
 function renderPicks(){
   const q = document.getElementById('pick-q').value.trim(), ql = q.toLowerCase();
   const all = [...library().values()];
-  const hits = all.filter(x => !ql || x.ex.name.toLowerCase().includes(ql) || (x.ex.target||'').toLowerCase().includes(ql));
+  const hits = all.filter(x => (!ql || x.ex.name.toLowerCase().includes(ql) || (x.ex.target||'').toLowerCase().includes(ql))
+                           && (!pickGroup || groupsOf(x.ex).includes(pickGroup)));
   // things I've done before first (most recent), then the rest of the plan alphabetically
-  hits.sort((a,b) => ((lastSets[b.ex.name]?.day||'') .localeCompare(lastSets[a.ex.name]?.day||'')) || a.ex.name.localeCompare(b.ex.name));
-  const shown = hits.slice(0, 40);
+  // with a muscle group picked, the lifts come before the stretches and warm-ups for it
+  const soft = x => pickGroup && pickGroup !== 'mobility' && groupsOf(x.ex).includes('mobility') ? 1 : 0;
+  hits.sort((a,b) => (soft(a) - soft(b)) || ((lastSets[b.ex.name]?.day||'') .localeCompare(lastSets[a.ex.name]?.day||'')) || a.ex.name.localeCompare(b.ex.name));
+  const shown = hits.slice(0, 60);
   PICKS = shown;
   let html = shown.map((x,i) => {
     const last = lastSets[x.ex.name];
@@ -204,7 +232,7 @@ function renderPicks(){
     return `<button class="pick" onclick="addItem(${i})"><span>${esc(x.ex.name)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
   }).join('');
   if(q && !all.some(x => x.ex.name.toLowerCase() === ql)) html += `<button class="pick new" onclick="addNew()"><span>+ Add “${esc(q)}”</span><small>New exercise</small></button>`;
-  if(!html) html = '<div class="empty">Type an exercise name to add it.</div>';
+  if(!html) html = `<div class="empty">${pickGroup ? 'Nothing in this group yet.' : 'Type an exercise name to add it.'}</div>`;
   document.getElementById('pick-list').innerHTML = html;
 }
 let PICKS = [];
