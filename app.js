@@ -247,7 +247,13 @@ function cycleSwap(){
 function resetSwap(){ draft().swaps[exId()]=0; delete draft().sets[exId()]; saveState(); pos=0; renderSlide(); }
 
 function go(d){ const n=idx+d; if(n<0||n>=list().length) return; dir=d; idx=n; pos=0; renderSlide(); }
-function toggleDone(){ const d=draft(); d.checked[exId()]=!d.checked[exId()]; saveState(); renderSlide(); }
+// Ticking done moves on to the next card (after a beat, so the tick registers); unticking stays put.
+function toggleDone(){
+  const d=draft(), id=exId(); d.checked[id]=!d.checked[id]; saveState();
+  if(!d.checked[id] || idx >= list().length-1) return renderSlide();
+  refreshDone(id);
+  const at = idx; setTimeout(() => { if(view==='workout' && idx===at && cur && cur.checked[id]){ go(1); window.scrollTo({ top:0, behavior:'smooth' }); } }, 350);
+}
 function setN(v){ draft().notes[exId()]=v; saveState(); }
 
 function setPlan(detail){
@@ -613,5 +619,23 @@ async function saveLog(){
   if(error) return toast(error.message, true);
   toast('Saved'); showHistory();
 }
+
+// ---------------------------------------------------------------- swipe between cards
+// Swipe left for the next card, right for the previous one. Only a clearly sideways swipe counts, so scrolling
+// the page doesn't flip cards, and swipes that start in a text box (or on a slider) are left alone.
+let swipe = null;
+document.addEventListener('touchstart', e => {
+  swipe = null;
+  if(view !== 'workout' || e.touches.length !== 1 || e.target.closest('input, textarea, select, iframe')) return;
+  const t = e.touches[0]; swipe = { x:t.clientX, y:t.clientY, at:Date.now() };
+}, { passive:true });
+document.addEventListener('touchend', e => {
+  if(!swipe || view !== 'workout') return;
+  const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, ms = Date.now() - swipe.at;
+  swipe = null;
+  if(Math.abs(dx) < 60 || Math.abs(dx) < 1.5*Math.abs(dy) || ms > 800) return;
+  const before = idx; go(dx < 0 ? 1 : -1);
+  if(idx !== before) window.scrollTo({ top:0, behavior:'smooth' });
+}, { passive:true });
 
 start();
