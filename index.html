@@ -170,6 +170,18 @@
   .extra { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
   .small-btn.ghost { background:var(--card); color:var(--ink-mute); border-color:var(--line); padding:6px 10px; }
   .extra-link { display:block; text-align:center; font-size:13px; color:var(--ink-mute); margin-top:12px; cursor:pointer; }
+  .sessbar { display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 6px 6px 12px; }
+  .sess-name { font-size:14px; font-weight:600; cursor:pointer; }
+  .sess-at { font-size:12.5px; color:var(--ink-mute); flex:1; }
+  .sess-discard { font-family:inherit; font-size:12px; font-weight:600; border:1px solid var(--line); background:var(--card); color:var(--ink-mute); border-radius:6px; padding:5px 9px; cursor:pointer; }
+  .finish button.alt { background:var(--card); color:var(--moss); border:1px solid var(--moss); }
+  .finish button.go { background:var(--moss); }
+  .or { display:flex; align-items:center; gap:10px; margin:22px 0 14px; color:var(--ink-mute); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+  .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
+  .pick-list { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+  .pick { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; font-family:inherit; font-size:15px; font-weight:500; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .pick small { font-size:12px; color:var(--ink-mute); font-weight:400; }
+  .pick.new { border-style:dashed; color:var(--moss); }
 </style>
 </head>
 <body>
@@ -182,7 +194,7 @@
         <button class="icon-btn" id="btn-history" onclick="showHistory()" title="History" aria-label="History"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></button>
       </div>
     </div>
-    <div class="sesswitch" id="tabs"></div>
+    <div class="sessbar" id="tabs" style="display:none"></div>
   </div>
   <div id="root"><div class="loading">Loading&hellip;</div></div>
 </div>
