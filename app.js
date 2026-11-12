@@ -280,7 +280,7 @@ function toggleDone(){
   const d=draft(), id=exId(); d.checked[id]=!d.checked[id]; saveState();
   if(!d.checked[id] || idx >= list().length-1) return renderSlide();
   refreshDone(id);
-  const at = idx; setTimeout(() => { if(view==='workout' && idx===at && cur && cur.checked[id]){ go(1); window.scrollTo({ top:0, behavior:'smooth' }); } }, 350);
+  const at = idx; setTimeout(() => { if(view==='workout' && idx===at && cur && cur.checked[id]){ flyOut(document.querySelector('.slide'), 1); } }, 300);
 }
 function setN(v){ draft().notes[exId()]=v; saveState(); }
 
@@ -293,16 +293,14 @@ function setsFor(ex){
   if(!d.sets[ex.id]) d.sets[ex.id] = Array.from({length: sp.n}, () => ({ w:'', r:'' }));
   return d.sets[ex.id];
 }
-// Typing a number into a set counts the exercise as done, unless I've unticked it myself.
-function setVal(i, field, v){
-  const ex=activeEx(); setsFor(ex)[i][field]=v;
-  if(String(v).trim() && cur.checked[ex.id] === undefined){ cur.checked[ex.id] = true; refreshDone(ex.id); }
-  saveState();
-}
+// Sets with numbers count as done when I save (unless I've unticked the exercise), without ticking the box:
+// the tick stays mine, so tapping it always means "done, next card".
+function setVal(i, field, v){ const ex=activeEx(); setsFor(ex)[i][field]=v; saveState(); }
+function hasNumbers(id){ return (cur.sets[id]||[]).some(s => String(s.w||'').trim() || String(s.r||'').trim()); }
+function exDone(id){ return cur.checked[id] === true || (cur.checked[id] !== false && hasNumbers(id)); }
 function refreshDone(id){
   const on = !!cur.checked[id], el = document.querySelector('.done-toggle');
   if(el){ el.className = 'done-toggle' + (on?' checked':''); el.querySelector('input').checked = on; el.lastChild.textContent = on ? 'Done' : 'Mark as done'; }
-  const dot = document.querySelectorAll('.dots .dot')[idx]; if(dot && !dot.classList.contains('active')) dot.classList.toggle('done', on);
 }
 function addSet(){ const ex=activeEx(); const s=setsFor(ex); const last=s[s.length-1]||{w:'',r:''}; s.push({ w:last.w, r:'' }); saveState(); renderSlide(); }
 function removeSet(){ const ex=activeEx(); const s=setsFor(ex); if(s.length>1){ s.pop(); saveState(); renderSlide(); } }
@@ -451,7 +449,7 @@ function renderSlide(){
   const enter = dir>=0?'24px':'-24px';
 
   let dots='<div class="dots">';
-  list.forEach((e,i)=>{ let c='dot'; if(i===idx)c+=' active'; else if(d.checked[e.id])c+=' done'; dots+=`<span class="${c}"></span>`; });
+  list.forEach((e,i)=>{ let c='dot'; if(i===idx)c+=' active'; else if(exDone(e.id))c+=' done'; dots+=`<span class="${c}"></span>`; });
   dots+='</div>';
 
   const playIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
@@ -649,21 +647,55 @@ async function saveLog(){
 }
 
 // ---------------------------------------------------------------- swipe between cards
-// Swipe left for the next card, right for the previous one. Only a clearly sideways swipe counts, so scrolling
-// the page doesn't flip cards, and swipes that start in a text box (or on a slider) are left alone.
-let swipe = null;
+// Tinder-style: the card follows my finger and tilts; a flick or a drag of about 70px throws it
+// off and brings in the next one, anything less springs back. Left = next, right = previous.
+// Up-and-down drags scroll the page as usual, and drags that start in a text box (or a video) are left alone.
+let drag = null;
+function flyOut(card, d){
+  if(!card){ go(d); return; }
+  card.style.animation = 'none';
+  card.style.transition = 'transform .22s ease-in, opacity .22s ease-in';
+  card.style.transform = `translateX(${-d*120}%) rotate(${-d*14}deg)`;
+  card.style.opacity = '0';
+  setTimeout(() => { go(d); window.scrollTo({ top:0, behavior:'smooth' }); }, 200);
+}
+function snapBack(card){
+  card.style.transition = 'transform .25s cubic-bezier(.2,1.4,.4,1)';
+  card.style.transform = '';
+}
 document.addEventListener('touchstart', e => {
-  swipe = null;
+  drag = null;
   if(view !== 'workout' || e.touches.length !== 1 || e.target.closest('input, textarea, select, iframe')) return;
-  const t = e.touches[0]; swipe = { x:t.clientX, y:t.clientY, at:Date.now() };
+  const card = e.target.closest('.slide'); if(!card) return;
+  const t = e.touches[0];
+  drag = { card, x:t.clientX, y:t.clientY, dx:0, vx:0, lastX:t.clientX, lastT:performance.now(), lock:null };
 }, { passive:true });
-document.addEventListener('touchend', e => {
-  if(!swipe || view !== 'workout') return;
-  const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, ms = Date.now() - swipe.at;
-  swipe = null;
-  if(Math.abs(dx) < 60 || Math.abs(dx) < 1.5*Math.abs(dy) || ms > 800) return;
-  const before = idx; go(dx < 0 ? 1 : -1);
-  if(idx !== before) window.scrollTo({ top:0, behavior:'smooth' });
-}, { passive:true });
+document.addEventListener('touchmove', e => {
+  if(!drag) return;
+  const t = e.touches[0], dx = t.clientX - drag.x, dy = t.clientY - drag.y;
+  if(!drag.lock){
+    if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    drag.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    if(drag.lock === 'y'){ drag = null; return; }                  // scrolling: leave it to the browser
+    drag.card.style.animation = 'none'; drag.card.style.transition = 'none';
+  }
+  e.preventDefault();                                              // sideways: the card moves, not the page
+  const now = performance.now();
+  drag.vx = (t.clientX - drag.lastX) / Math.max(1, now - drag.lastT); drag.lastX = t.clientX; drag.lastT = now;
+  drag.dx = dx;
+  const blocked = (dx < 0 && idx >= list().length-1) || (dx > 0 && idx <= 0);
+  const shown = blocked ? dx * 0.25 : dx;                          // nothing that way: it gives a little, then springs back
+  drag.card.style.transform = `translateX(${shown}px) rotate(${shown/22}deg)`;
+}, { passive:false });
+function endDrag(){
+  if(!drag || drag.lock !== 'x'){ drag = null; return; }
+  const { card, dx, vx } = drag; drag = null;
+  const d = dx < 0 ? 1 : -1, can = idx + d >= 0 && idx + d < list().length;
+  const far = Math.abs(dx) > Math.min(window.innerWidth * 0.18, 70);
+  const flick = Math.abs(dx) > 20 && Math.abs(vx) > 0.25 && Math.sign(vx) === Math.sign(dx);
+  if(can && (far || flick)) flyOut(card, d); else snapBack(card);
+}
+document.addEventListener('touchend', endDrag, { passive:true });
+document.addEventListener('touchcancel', endDrag, { passive:true });
 
 start();
