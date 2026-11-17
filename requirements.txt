@@ -1,0 +1,10 @@
+# Exact versions for the db/ scripts (Garmin sync, SQL runner). Install: .venv/bin/pip install -r requirements.txt
+# garmin-connect-personal-api-python is Garmin's official client; upgrade on purpose, not by accident.
+certifi==2026.10.23
+charset-normalizer==3.5.2
+garmin-connect-personal-api-python==1.0.0
+idna==3.20
+psycopg==3.3.8
+psycopg-binary==3.3.8
+requests==2.34.2
+urllib3==2.8.0

@@ -7,3 +7,5 @@ db/profile.json
 *.local.*
 .DS_Store
 __pycache__/
+plan.inline.json
+exercises.json

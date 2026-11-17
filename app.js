@@ -15,11 +15,14 @@ const SPORTS = [['run','Run'],['cycle','Cycle'],['swim','Swim'],['football','Foo
 // { id, mode:'plan'|'custom', session_key, day, started_at, items:[exercise added on the go],
 //   checked:{exId:true}, sets:{exId:[{w,r}]}, notes:{exId}, swaps:{exId:n} }
 let cur = null;
-let lastSets = {};        // exercise name -> {day, sets:[{weight_kg,reps,seconds}]}
+let lastSets = {};        // exercise id -> {day, name, sets:[{weight_kg,reps,seconds}]}
+let EXERCISES = {};       // the catalogue: exercise id -> row from the exercises table
 let idx=0, dir=1, pos=0, loaded=false, view='workout';
 let videoView = false;
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const slugify = t => String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');   // same rule as schema.sql
+const exKey = ex => ex.exercise || slugify(ex.name);       // an exercise's catalogue id
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
 function toast(msg, bad){ const t=document.getElementById('toast'); t.textContent=msg; t.className='toast show'+(bad?' bad':''); clearTimeout(toast.id); toast.id=setTimeout(()=>t.className='toast',2600); }
 
@@ -59,14 +62,17 @@ async function signOut(){ await db.auth.signOut(); loaded=false; showLogin(); }
 
 // ---------------------------------------------------------------- load + save
 async function loadAll(){
-  const [{ data:plans, error:e1 }, { data:open, error:e2 }, { data:sets, error:e3 }] = await Promise.all([
+  const [{ data:plans, error:e1 }, { data:open, error:e2 }, { data:sets, error:e3 }, { data:exs, error:e4 }] = await Promise.all([
     db.from('plans').select('id,version,plan').eq('active', true).limit(1),
     db.from('activities').select('id,day,session_key,started_at,data').eq('type','gym').eq('status','in_progress').order('started_at',{ascending:false}).limit(1),
-    db.from('sets').select('exercise,weight_kg,reps,seconds,set_no,done,created_at,activities(day,status)').order('created_at',{ascending:false}).limit(400),
+    db.from('last_sets').select('exercise_id,exercise,weight_kg,reps,seconds,set_no,day'),
+    db.from('exercises').select('id,name,target,groups,imgs,caps,cues,vid,yt,svgs,aliases,source'),
   ]);
-  if(e1||e2||e3){ document.getElementById('root').innerHTML = `<div class="empty">Couldn't load your data.<br>${esc((e1||e2||e3).message)}</div>`; return; }
+  const err = e1||e2||e3||e4;
+  if(err){ document.getElementById('root').innerHTML = `<div class="empty">Couldn't load your data.<br>${esc(err.message)}</div>`; return; }
+  EXERCISES = {}; for(const e of exs) EXERCISES[e.id] = e;
   if(!plans.length){ document.getElementById('root').innerHTML = '<div class="empty">No active plan yet.</div>'; return; }
-  PLAN_ID = plans[0].id; PLAN_META = plans[0].plan; PLAN = PLAN_META.days;
+  PLAN_ID = plans[0].id; PLAN_META = plans[0].plan; PLAN = hydrate(PLAN_META.days);
   if(PLAN_META.stage_labels) STAGE_LABEL = PLAN_META.stage_labels;
   if(PLAN_META.day_labels) SESSION_LABEL = PLAN_META.day_labels;
   document.getElementById('tools').style.display = '';
@@ -80,15 +86,31 @@ async function loadAll(){
   if(!cur || (remote && cur.id !== remote.id)) cur = remote;
   if(cur && !cur.id) pushDraft();
   lastSets = {};
-  for(const s of sets){
-    if(!s.activities || s.activities.status !== 'done') continue;
-    const k = s.exercise, d = s.activities.day;
-    if(!lastSets[k]) lastSets[k] = { day:d, sets:[] };
-    if(lastSets[k].day === d) lastSets[k].sets.push(s);
+  for(const s of sets){                                // last_sets: only the latest finished session of each exercise
+    const k = s.exercise_id || slugify(s.exercise);
+    if(!lastSets[k]) lastSets[k] = { day:s.day, name:s.exercise, sets:[] };
+    lastSets[k].sets.push(s);
   }
   for(const k in lastSets) lastSets[k].sets.sort((a,b)=>a.set_no-b.set_no);
   loaded = true; goHome();
 }
+// Plan slots point at the catalogue: { id, stage, detail, log, prog, startW, exercise, ...day-specific overrides,
+// alts:[{ exercise, ...overrides }] }. Rebuild the full card the rest of the app uses: catalogue fields first,
+// then whatever the slot says for that day. Older plans with the exercise written out inline pass straight through.
+const EX_FIELDS = ['name','target','imgs','caps','cues','vid','yt','svgs'];
+function exBase(id){
+  const e = EXERCISES[id], out = {};
+  if(!e) return { name:id };
+  for(const f of EX_FIELDS) if(e[f] != null) out[f] = e[f];
+  return out;
+}
+function fromRef(ref){ return ref.exercise && !ref.name ? Object.assign(exBase(ref.exercise), ref) : Object.assign({ exercise:slugify(ref.name) }, ref); }
+function hydrate(days){
+  const out = {};
+  for(const [day, slots] of Object.entries(days||{})) out[day] = slots.map(s => Object.assign(fromRef(s), { alts:(s.alts||[]).map(fromRef) }));
+  return out;
+}
+
 const CUR_KEY = 'current';
 function emptyDraft(){ return { checked:{}, sets:{}, notes:{}, swaps:{}, items:[] }; }
 function draft(){ return cur; }
@@ -163,20 +185,23 @@ async function discardSession(){
 }
 
 // ---------------------------------------------------------------- adding exercises on the go
-// Everything I could add: every exercise in the plan (and its swaps), plus anything I've logged before.
+// Everything I could add: the whole exercise catalogue (plan exercises, swaps, and anything I've typed in before),
+// keyed by catalogue id. Exercises in the plan come with their first plan slot's sets/reps, stage and progression.
 function library(){
   const out = new Map();
   for(const day of (PLAN_META.day_order || Object.keys(PLAN))){
     for(const base of (PLAN[day]||[])){
-      const add = (ex, slot) => { if(!out.has(ex.name)) out.set(ex.name, { ex, slot, from:'plan' }); };
+      const add = (ex, slot) => { const k = exKey(ex); if(!out.has(k)) out.set(k, { ex, slot, from:'plan' }); };
       add(base, base.id);
       (base.alts||[]).forEach(a => add({ stage:base.stage, detail:base.detail, log:base.log, prog:(a.prog||base.prog), ...a }, base.id));
     }
   }
-  for(const name of Object.keys(lastSets)) if(!out.has(name)) out.set(name, { ex:{ name, detail:'', log:true }, slot:null, from:'history' });
+  for(const id of Object.keys(EXERCISES)) if(!out.has(id)) out.set(id, { ex:{ ...exBase(id), exercise:id, detail:'', log:true }, slot:null, from:'catalogue' });
+  for(const [id, last] of Object.entries(lastSets)) if(!out.has(id)) out.set(id, { ex:{ name:last.name, exercise:id, detail:'', log:true }, slot:null, from:'history' });
   return out;
 }
-// Muscle groups, read from each exercise's target in the plan (or its name, for exercises I typed in myself).
+// Muscle groups: stored on each catalogue exercise. For one with none stored (typed in myself), guess from its
+// target or name with these patterns, which also seeded the catalogue (db/split_exercises.py reads this table).
 // An exercise can sit in more than one group, e.g. "Glutes & hamstrings".
 const GROUPS = [
   ['chest',     'Chest',      /chest|bench|push-?up|\bfly|flye/],
@@ -191,7 +216,11 @@ const GROUPS = [
   ['hips',      'Hips',       /\bhips?\b|adductor|groin|hip flexor/],
   ['mobility',  'Mobility & warm-up', /release|mobility|warm-?up|\bprep\b|rehearsal|\bspine\b|thoracic|stretch/],
 ];
-function groupsOf(ex){ const s = (ex.target || ex.name).toLowerCase(); return GROUPS.filter(g => g[2].test(s)).map(g => g[0]); }
+function groupsOf(ex){
+  const e = EXERCISES[exKey(ex)];
+  if(e && e.groups && e.groups.length) return e.groups;
+  const s = (ex.target || ex.name).toLowerCase(); return GROUPS.filter(g => g[2].test(s)).map(g => g[0]);
+}
 let pickGroup = '';
 function setPickGroup(g){ pickGroup = pickGroup === g ? '' : g; renderChips(); renderPicks(); }
 function renderChips(){
@@ -223,21 +252,22 @@ function renderPicks(){
   // things I've done before first (most recent), then the rest of the plan alphabetically
   // with a muscle group picked, the lifts come before the stretches and warm-ups for it
   const soft = x => pickGroup && pickGroup !== 'mobility' && groupsOf(x.ex).includes('mobility') ? 1 : 0;
-  hits.sort((a,b) => (soft(a) - soft(b)) || ((lastSets[b.ex.name]?.day||'') .localeCompare(lastSets[a.ex.name]?.day||'')) || a.ex.name.localeCompare(b.ex.name));
+  hits.sort((a,b) => (soft(a) - soft(b)) || ((lastSets[exKey(b.ex)]?.day||'').localeCompare(lastSets[exKey(a.ex)]?.day||'')) || a.ex.name.localeCompare(b.ex.name));
   const shown = hits.slice(0, 60);
   PICKS = shown;
   let html = shown.map((x,i) => {
-    const last = lastSets[x.ex.name];
+    const last = lastSets[exKey(x.ex)];
     const sub = [x.ex.target, last ? 'last ' + fmtDay(last.day) : ''].filter(Boolean).join(' · ');
     return `<button class="pick" onclick="addItem(${i})"><span>${esc(x.ex.name)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
   }).join('');
-  if(q && !all.some(x => x.ex.name.toLowerCase() === ql)) html += `<button class="pick new" onclick="addNew()"><span>+ Add “${esc(q)}”</span><small>New exercise</small></button>`;
+  if(q && slugify(q) && !all.some(x => exKey(x.ex) === slugify(q))) html += `<button class="pick new" onclick="addNew()"><span>+ Add “${esc(q)}”</span><small>New exercise</small></button>`;
   if(!html) html = `<div class="empty">${pickGroup ? 'Nothing in this group yet.' : 'Type an exercise name to add it.'}</div>`;
   document.getElementById('pick-list').innerHTML = html;
 }
 let PICKS = [];
 function addItem(i){ const x = PICKS[i]; if(x) pushItem(x.ex, x.slot); }
-function addNew(){ const name = document.getElementById('pick-q').value.trim(); if(name) pushItem({ name, detail:'', log:true }, null); }
+// a new exercise: the database adds it to the catalogue when its first set is saved (sets_fill_exercise)
+function addNew(){ const name = document.getElementById('pick-q').value.trim(); if(slugify(name)) pushItem({ name, exercise:slugify(name), detail:'', log:true }, null); }
 function pushItem(src, slot){
   const { alts, id, ...ex } = src;                       // an added exercise is exactly what I picked: no swapping
   const item = Object.assign({ stage:'main', detail:'', cues:[], log:true }, ex,
@@ -262,7 +292,7 @@ function activeEx(){
   if(!v || !base.alts || !base.alts[v-1]) return base;
   const a = base.alts[v-1];
   return { id:base.id, stage:base.stage, detail:base.detail, log:base.log, prog:(a.prog||base.prog),
-           name:a.name, target:a.target, startW:a.startW, imgs:a.imgs, svgs:a.svgs, caps:a.caps, cues:a.cues, vid:a.vid, yt:a.yt, alts:base.alts };
+           exercise:exKey(a), name:a.name, target:a.target, startW:a.startW, imgs:a.imgs, svgs:a.svgs, caps:a.caps, cues:a.cues, vid:a.vid, yt:a.yt, alts:base.alts };
 }
 function cycleSwap(){
   const base = list()[idx];
@@ -310,7 +340,7 @@ const num = v => { const m = String(v||'').replace(',', '.').match(/-?\d+(\.\d+)
 function fmtKg(x){ return x==null ? '' : (Math.round(x*10)/10)+'kg'; }
 
 function suggestion(ex){
-  const last = lastSets[ex.name];
+  const last = lastSets[exKey(ex)];
   if(!last || !last.sets.length) return null;
   const sp = setPlan(ex.detail), hold = parseHold(ex.detail) !== null;
   const ws = last.sets.map(s=>s.weight_kg).filter(x=>x!=null);
@@ -341,13 +371,13 @@ async function finishSession(){
     sets.forEach((s, k) => {
       const w = num(s.w), r = num(s.r);
       if(w==null && r==null) return;
-      rows.push({ activity_id:d.id, exercise:ex.name, slot, set_no:k+1, weight_kg:w,
+      rows.push({ activity_id:d.id, exercise:ex.name, exercise_id:exKey(ex), slot, set_no:k+1, weight_kg:w,
                   reps: hold ? null : (r==null?null:Math.round(r)), seconds: hold ? (r==null?null:Math.round(r)) : null,
                   done: d.checked[base.id] !== false, note: k===0 ? (d.notes[base.id]||null) : null });
     });
     // ticked with no numbers (warm-ups, mobility, or a lift not written down): still a record of what I did
     if(rows.length === before && d.checked[base.id]){
-      rows.push({ activity_id:d.id, exercise:ex.name, slot, set_no:1, done:true, note: d.notes[base.id]||null });
+      rows.push({ activity_id:d.id, exercise:ex.name, exercise_id:exKey(ex), slot, set_no:1, done:true, note: d.notes[base.id]||null });
     }
   });
   idx = keepIdx;
