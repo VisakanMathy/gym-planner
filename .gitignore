@@ -9,3 +9,4 @@ db/profile.json
 __pycache__/
 plan.inline.json
 exercises.json
+drafts/
