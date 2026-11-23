@@ -1,6 +1,6 @@
 // Gym planner — app logic. Data lives in Supabase (see db/schema.sql); the plan is loaded from the `plans` table.
 /* global supabase, GYM_CONFIG */
-const IMG_BASE = 'https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db/exercises/';
+const IMG_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/';   // jsDelivr refuses this repo (over its 50 MB package limit)
 function imgSrc(path){ return path ? IMG_BASE + path : ''; }
 const db = supabase.createClient(GYM_CONFIG.url, GYM_CONFIG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
@@ -496,12 +496,13 @@ function renderSlide(){
         <span class="pos-pill" id="pos-pill">${ex.caps[0]}</span>
       </div>`;
   } else { mediaStage = ''; }
-  if(videoView){
+  const hasPic = !!mediaStage;                         // no photo or drawing: show the video straight away
+  if(videoView || (!hasPic && ex.yt)){
     mediaStage = ex.yt
       ? `<div class="photo-stage"><iframe src="https://www.youtube-nocookie.com/embed/${ex.yt}?rel=0&playsinline=1" title="${esc(ex.name)} demo" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>`
       : `<div class="photo-stage"><div class="video-missing">No video picked for this one yet<a href="${videoUrl(ex.vid)}" target="_blank" rel="noopener">Search YouTube</a></div></div>`;
   }
-  if(mediaStage){ mediaStage = `<div class="media-wrap"><button class="view-switch" onclick="toggleVideoView()">${videoView ? 'Picture' : '&#9654; Video'}</button>${mediaStage}</div>`; }
+  if(mediaStage){ mediaStage = `<div class="media-wrap">${hasPic ? `<button class="view-switch" onclick="toggleVideoView()">${videoView ? 'Picture' : '&#9654; Video'}</button>` : ''}${mediaStage}</div>`; }
 
   let posToggle='';
   if(!videoView && ((ex.imgs && ex.imgs.length>1) || (ex.svgs && ex.svgs.length>1)) && ex.caps.length>1){
